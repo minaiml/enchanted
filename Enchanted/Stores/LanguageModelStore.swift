@@ -10,9 +10,12 @@ import SwiftData
 
 @Observable
 final class LanguageModelStore {
+    static let shared = LanguageModelStore(swiftDataService: SwiftDataService.shared)
+    
     private var swiftDataService: SwiftDataService
-    var models: [LanguageModelSD] = []
-    var selectedModel: LanguageModelSD?
+    @MainActor var models: [LanguageModelSD] = []
+    @MainActor var supportsImages = false
+    @MainActor var selectedModel: LanguageModelSD?
     
     init(swiftDataService: SwiftDataService) {
         self.swiftDataService = swiftDataService
@@ -20,32 +23,45 @@ final class LanguageModelStore {
     
     @MainActor
     func setModel(model: LanguageModelSD?) {
-        selectedModel = model
+        if let model = model {
+            // check if model still exists
+            if models.contains(model) {
+                selectedModel = model
+            }
+        } else {
+            selectedModel = nil
+        }
     }
     
     @MainActor
-    func loadModels() async throws {
-        print("loading models")
-        let localModels = try await loadLocal()
-        let remoteModels = try await loadRemote()
-    
-        _ = localModels.map { model in
-            model.isAvailable == remoteModels.contains(model)
+    func setModel(modelName: String) {
+        for model in models {
+            if model.name == modelName {
+                setModel(model: model)
+                return
+            }
         }
+        if let lastModel = models.last {
+            setModel(model: lastModel)
+        }
+    }
+    
+    func loadModels() async throws {
+        let remoteModels = try await OllamaService.shared.getModels()
+        try await swiftDataService.saveModels(models: remoteModels.map{LanguageModelSD(name: $0.name, imageSupport: $0.imageSupport, modelProvider: .ollama)})
         
-        let updateModelsList = Array(Set(localModels + remoteModels))
-        try swiftDataService.saveModels(models: updateModelsList)
+        let storedModels = (try? await swiftDataService.fetchModels()) ?? []
         
-        models = try await loadLocal()
-        print("loaded models")
+        DispatchQueue.main.async {
+            let remoteModelNames = remoteModels.map { $0.name }
+            self.models = storedModels.filter{remoteModelNames.contains($0.name)}
+        }
     }
     
-    private func loadLocal() async throws -> [LanguageModelSD] {
-        return try swiftDataService.fetchModels()
+    func deleteAllModels() async throws {
+        DispatchQueue.main.async {
+            self.models = []
+        }
+        try await swiftDataService.deleteModels()
     }
-    
-    private func loadRemote() async throws -> [LanguageModelSD] {
-        return try await OllamaService.shared.getModels()
-    }
-    
 }

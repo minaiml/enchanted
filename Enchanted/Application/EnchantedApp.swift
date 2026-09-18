@@ -8,47 +8,58 @@
 import SwiftUI
 import SwiftData
 
+#if os(macOS)
+import KeyboardShortcuts
+extension KeyboardShortcuts.Name {
+    static let togglePanelMode = Self("togglePanelMode1", default: .init(.k, modifiers: [.command, .option]))
+}
+#endif
+
 @main
 struct EnchantedApp: App {
-    @AppStorage("colorScheme") private var colorScheme: AppColorScheme = .system
-    @State private var languageModelStore: LanguageModelStore
-    @State private var conversationStore: ConversationStore
-    @State private var appStore: AppStore
-    
-    var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            LanguageModelSD.self,
-            ConversationSD.self,
-            MessageSD.self,
-        ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-        
-        do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
-        } catch {
-            fatalError("Could not create ModelContainer: \(error)")
-        }
-    }()
-    
-    init() {
-        let swiftDataService = SwiftDataService(modelContext: sharedModelContainer.mainContext)
-        languageModelStore = LanguageModelStore(swiftDataService: swiftDataService)
-        conversationStore = ConversationStore(swiftDataService: swiftDataService)
-        appStore = AppStore()
-    }
+    @State private var appStore = AppStore.shared
+#if os(macOS)
+    @NSApplicationDelegateAdaptor(PanelManager.self) var panelManager
+#endif
     
     var body: some Scene {
         WindowGroup {
-            MainView()
-                .environment(languageModelStore)
-                .environment(conversationStore)
-                .environment(appStore)
-                .task {
-                    try? await languageModelStore.loadModels()
-                    try? await conversationStore.loadConversations()
+            ApplicationEntry()
+#if os(macOS)
+                .onKeyboardShortcut(KeyboardShortcuts.Name.togglePanelMode, type: .keyDown) {
+                    print("heya")
+                    panelManager.togglePanel()
                 }
-                .preferredColorScheme(colorScheme.toiOSFormat)
+                .onAppear {
+                    NSWindow.allowsAutomaticWindowTabbing = false
+                }
+#endif
         }
-        .modelContainer(sharedModelContainer)
+#if os(macOS)
+        .commands {
+            Menus()
+        }
+#endif
+#if os(macOS)
+        Window("Keyboard Shortcuts", id: "keyboard-shortcuts") {
+            KeyboardShortcutsDemo()
+        }
+#endif
+        
+#if os(macOS)
+#if false
+        MenuBarExtra {
+            MenuBarControl()
+        } label: {
+            if let iconName = appStore.menuBarIcon {
+                Image(systemName: iconName)
+            } else {
+                MenuBarControlView.icon
+            }
+        }
+        .menuBarExtraStyle(.window)
+#endif
+#endif
     }
 }
+

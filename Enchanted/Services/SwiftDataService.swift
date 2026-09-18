@@ -8,11 +8,34 @@
 import Foundation
 import SwiftData
 
-final class SwiftDataService {
-    private var modelContext: ModelContext
+final actor SwiftDataService: ModelActor {
+    let modelContainer: ModelContainer
+    let modelExecutor: ModelExecutor
+    private let modelContext: ModelContext
     
-    init(modelContext: ModelContext) {
-        self.modelContext = modelContext
+    static let shared = SwiftDataService()
+    
+    init() {
+        let sharedModelContainer: ModelContainer = {
+            let schema = Schema([
+                LanguageModelSD.self,
+                ConversationSD.self,
+                MessageSD.self,
+                CompletionInstructionSD.self
+            ])
+            let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+            
+            do {
+                return try ModelContainer(for: schema, configurations: [modelConfiguration])
+            } catch {
+                fatalError("Could not create ModelContainer: \(error)")
+            }
+        }()
+        
+        self.modelContext = ModelContext(sharedModelContainer)
+        self.modelContext.autosaveEnabled = false
+        modelContainer = sharedModelContainer
+        modelExecutor = DefaultSerialModelExecutor(modelContext: modelContext)
     }
 }
 
@@ -31,6 +54,11 @@ extension SwiftDataService {
             modelContext.insert(model)
         }
         
+        try modelContext.saveChanges()
+    }
+    
+    func deleteModels() throws {
+        try modelContext.delete(model: LanguageModelSD.self)
         try modelContext.saveChanges()
     }
 }
@@ -68,6 +96,21 @@ extension SwiftDataService {
         let conversations = try modelContext.fetch(fetchDescriptor)
         return conversations.first
     }
+    
+    func deleteConversations() throws {
+        try modelContext.delete(model: ConversationSD.self)
+        try modelContext.saveChanges()
+    }
+    
+    func deleteMessages() throws {
+        try modelContext.delete(model: MessageSD.self)
+        try modelContext.saveChanges()
+    }
+    
+    func deleteConversations(_ date: Date) throws {
+        let predicate = #Predicate<ConversationSD>{ $0.createdAt >=  date && $0.createdAt <= date}
+        try modelContext.delete(model: ConversationSD.self, where: predicate)
+    }
 }
 
 
@@ -86,6 +129,39 @@ extension SwiftDataService {
     
     func createMessage(_ mesasge: MessageSD) throws {
         self.modelContext.insert(mesasge)
+        try modelContext.saveChanges()
+    }
+}
+
+// MARK: - CompletionInstruction
+extension SwiftDataService {
+    func fetchCompletionInstructions() throws -> [CompletionInstructionSD] {
+        let sortDescriptor = SortDescriptor(\CompletionInstructionSD.order, order: .forward)
+        let fetchDescriptor = FetchDescriptor<CompletionInstructionSD>(sortBy: [sortDescriptor])
+        return try modelContext.fetch(fetchDescriptor)
+    }
+    
+    func updateCompletionInstructions(_ instructions: [CompletionInstructionSD]) throws {
+        for index in instructions.indices {
+            instructions[index].order = index
+            modelContext.insert(instructions[index])
+        }
+        try modelContext.saveChanges()
+    }
+    
+    func deleteCompletionInstruction(_ instruction: CompletionInstructionSD) throws {
+        self.modelContext.delete(instruction)
+        try modelContext.saveChanges()
+    }
+}
+
+// MARK: - General
+extension SwiftDataService {
+    func deleteEverything() throws {
+        try modelContext.delete(model: ConversationSD.self)
+        try modelContext.delete(model: LanguageModelSD.self)
+        try modelContext.delete(model: MessageSD.self)
+        try modelContext.delete(model: CompletionInstructionSD.self)
         try modelContext.saveChanges()
     }
 }
